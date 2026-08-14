@@ -1,0 +1,12 @@
+---
+configuration:
+  terminal_font_size:
+    name: Terminal font size
+    description: Font size used in the web terminal (10–24).
+  terminal_theme:
+    name: Terminal theme
+    description: Color theme for the web terminal.
+  auto_update_claude:
+    name: Auto-update Claude Code
+    description: >-
+      Update Claude Code to the latest version each time the add-on starts.

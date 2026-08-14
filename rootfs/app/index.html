@@ -106,7 +106,7 @@
 <body>
   <div id="tab-bar">
     <div id="tabs"></div>
-    <div id="new-tab-btn" title="New session (Ctrl+T)">＋</div>
+    <div id="new-tab-btn" title="New session">＋</div>
   </div>
   <div id="terminal-wrap"></div>
   <div id="overlay">Reconnecting…</div>
@@ -114,6 +114,7 @@
 
   <script src="assets/xterm.js"></script>
   <script src="assets/addon-fit.js"></script>
+  <script src="assets/addon-web-links.js"></script>
   <script>
     // Values injected by Bun server at request time
     const __ingressPath = "{{INGRESS_PATH}}";
@@ -144,11 +145,11 @@
       fontFamily: "Monaco, Menlo, Consolas, 'Courier New', monospace",
       cursorBlink: true,
       scrollback: 5000,
-      bracketedPasteMode: true,
       allowProposedApi: true,
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
     term.open(document.getElementById("terminal-wrap"));
     fitAddon.fit();
 
@@ -191,6 +192,11 @@
       ws.onopen = () => {
         reconnectAttempts = 0;
         document.getElementById("overlay").classList.remove("show");
+        // Server replays the full scrollback on join — wipe first so a
+        // reconnect doesn't append a duplicate copy of the history.
+        // Tradeoff: terminal modes set before the 500KB replay window
+        // (mouse reporting etc.) are lost until the app re-asserts them.
+        term.reset();
         ws.send(JSON.stringify({ type: "join", session: activeSession }));
         sendResize();
       };
@@ -201,6 +207,11 @@
 
         if (msg.type === "output") {
           term.write(msg.data);
+        } else if (msg.type === "session_renamed") {
+          const i = knownSessions.indexOf(msg.from);
+          if (i !== -1) knownSessions[i] = msg.to;
+          if (activeSession === msg.from) activeSession = msg.to;
+          renderTabs();
         } else if (msg.type === "session_list") {
           knownSessions = msg.sessions;
           renderTabs();
@@ -227,7 +238,7 @@
     // --- Session switching ---
     function switchSession(name) {
       if (name === activeSession && ws?.readyState === WebSocket.OPEN) return;
-      term.clear();
+      term.reset();
       activeSession = name;
       renderTabs();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -246,7 +257,7 @@
       const raw = prompt("Session name:", `session-${knownSessions.length + 1}`);
       const name = raw?.trim();
       if (!name) return;
-      term.clear();
+      term.reset();
       activeSession = name;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "new_session", session: name }));
@@ -290,14 +301,13 @@
       input.select();
 
       const commit = () => {
-        const newName = input.value.trim() || oldName;
-        if (newName !== oldName && ws?.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "new_session", session: newName }));
-          activeSession = newName;
-          setTimeout(() => closeSessionUI(oldName), 200);
-        } else {
-          labelEl.textContent = newName;
-          input.replaceWith(labelEl);
+        const newName = input.value.trim();
+        input.replaceWith(labelEl);
+        // Rename re-keys the session server-side — the PTY keeps running.
+        // Tabs update via the session_renamed / session_list broadcasts.
+        if (newName && newName !== oldName && !knownSessions.includes(newName) &&
+            ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "rename_session", from: oldName, to: newName }));
         }
       };
       input.onblur = commit;

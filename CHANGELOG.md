@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.8
+
+- Fix: the startup script no longer overwrites the global `CLAUDE.md` memory file on every start — memories saved via `/memory` now survive restarts
+- Fix: renaming a tab (double-click) no longer kills the running session — the session is re-keyed server-side and keeps running
+- Fix: reconnecting no longer duplicates the terminal history
+- URLs printed in the terminal are now clickable (e.g. the login link on first run)
+- Add Supervisor watchdog — the add-on is restarted automatically if the terminal server hangs
+- Add documentation tab content (`DOCS.md`) and friendly config option descriptions
+- Update Home Assistant CLI to 5.3.0, xterm.js to 6.0.0
+
 ## 1.0.7
 
 - Grant the add-on the `manager` Supervisor role so the `ha` CLI can read logs (`ha core/supervisor/host logs`, add-on logs) and manage add-ons, backups, and the store. Previously the default role only allowed `*/info` endpoints, so log commands returned 403 Forbidden.

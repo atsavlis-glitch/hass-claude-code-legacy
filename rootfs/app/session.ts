@@ -1,9 +1,22 @@
+import { existsSync } from "fs";
+
 export const SCROLLBACK_LIMIT = 500 * 1024; // 500 KB
+
+// /homeassistant is the add-on's mapped HA config dir; fall back so sessions
+// still spawn if the mapping is unavailable (e.g. local development)
+const SESSION_CWD = existsSync("/homeassistant") ? "/homeassistant" : process.env.HOME || "/";
+
+// The slice of ServerWebSocket<WsData> that session management relies on.
+// Structural contract — server.ts sockets and test fakes both satisfy it.
+export type Client = {
+  data: { session: string | null };
+  send: (msg: string) => unknown;
+};
 
 export type Session = {
   // Typed loosely — Bun.Subprocess with terminal option; exact types vary by Bun version
   proc: any;
-  clients: Set<any>; // Set<ServerWebSocket> — avoid circular import with server.ts
+  clients: Set<Client>;
   name: string;
   scrollback: string;
 };
@@ -17,7 +30,7 @@ export function appendScrollback(session: Pick<Session, "scrollback">, data: str
   }
 }
 
-export function broadcastSessionList(): void {
+function broadcastSessionList(): void {
   const msg = JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] });
   for (const session of sessions.values()) {
     for (const ws of session.clients) {
@@ -30,7 +43,7 @@ function spawnPty(session: Session): void {
   const proc = Bun.spawn(
     ["bash", "--login"],
     {
-      cwd: "/homeassistant",
+      cwd: SESSION_CWD,
       terminal: {
         cols: 220,
         rows: 50,
@@ -83,6 +96,21 @@ export function createSession(name: string): Session {
 
 export function restartSessionProc(session: Session): void {
   spawnPty(session);
+}
+
+export function renameSession(oldName: string, newName: string): boolean {
+  const session = sessions.get(oldName);
+  if (!session || !newName || sessions.has(newName)) return false;
+  sessions.delete(oldName);
+  session.name = newName;
+  sessions.set(newName, session);
+  const msg = JSON.stringify({ type: "session_renamed", from: oldName, to: newName });
+  for (const ws of session.clients) {
+    ws.data.session = newName;
+    ws.send(msg);
+  }
+  broadcastSessionList();
+  return true;
 }
 
 export function closeSession(name: string): void {

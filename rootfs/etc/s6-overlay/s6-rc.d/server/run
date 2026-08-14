@@ -18,8 +18,12 @@ _merge_permission() {
 _merge_permission "/root/.claude/settings.json"
 _merge_permission "/data/.claudecode/settings.json"
 
-# Write image-paste convention so Claude Code understands [Image: path] references
-cat > /data/.claudecode/CLAUDE.md << 'EOF'
+# Append image-paste convention so Claude Code understands [Image: path] references.
+# CLAUDE.md is also Claude Code's global memory file (/memory) — never overwrite it,
+# only append the block once if it is missing.
+if ! grep -q "^# Image Paste Convention" /data/.claudecode/CLAUDE.md 2>/dev/null; then
+  cat >> /data/.claudecode/CLAUDE.md << 'EOF'
+
 # Image Paste Convention
 
 When the user pastes an image into the terminal, it is saved to disk and the text
@@ -27,6 +31,7 @@ When the user pastes an image into the terminal, it is saved to disk and the tex
 
 When you see `[Image: /path/to/image.png]`, read the image directly from the specified path.
 EOF
+fi
 
 # --- Environment ---
 export CLAUDE_CONFIG_DIR="/data/.claudecode"

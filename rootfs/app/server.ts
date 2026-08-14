@@ -4,10 +4,11 @@ import {
   sessions,
   createSession,
   closeSession,
+  renameSession,
   restartSessionProc,
-  broadcastSessionList,
 } from "./session.ts";
 import { handleUpload, DEFAULT_UPLOAD_BASE } from "./upload.ts";
+import { serveAsset } from "./assets.ts";
 
 // --- Startup ---
 mkdirSync(DEFAULT_UPLOAD_BASE, { recursive: true });
@@ -22,7 +23,8 @@ type ClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
   | { type: "new_session"; session: string }
-  | { type: "close_session"; session: string };
+  | { type: "close_session"; session: string }
+  | { type: "rename_session"; from: string; to: string };
 
 type WsData = { session: string | null };
 
@@ -35,7 +37,7 @@ function handleMessage(ws: any, raw: string): void {
     return;
   }
 
-  if (msg.type === "join") {
+  if (msg.type === "join" || msg.type === "new_session") {
     const prev = sessions.get(ws.data.session);
     if (prev) prev.clients.delete(ws);
     const session = sessions.get(msg.session) ?? createSession(msg.session);
@@ -48,17 +50,18 @@ function handleMessage(ws: any, raw: string): void {
     return;
   }
 
-  if (msg.type === "new_session") {
-    const prev = sessions.get(ws.data.session);
-    if (prev) prev.clients.delete(ws);
-
-    const session = sessions.get(msg.session) ?? createSession(msg.session);
-    session.clients.add(ws);
-    ws.data.session = msg.session;
-    if (session.scrollback) {
-      ws.send(JSON.stringify({ type: "output", data: session.scrollback }));
+  if (msg.type === "rename_session") {
+    if (!renameSession(msg.from, msg.to)) {
+      // Rename refused (stale name, duplicate target) — resync the requester's tabs
+      ws.send(JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] }));
     }
-    ws.send(JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] }));
+    return;
+  }
+
+  if (msg.type === "close_session") {
+    const closing = sessions.get(msg.session);
+    if (closing) closing.clients.delete(ws);
+    closeSession(msg.session);
     return;
   }
 
@@ -79,10 +82,6 @@ function handleMessage(ws: any, raw: string): void {
     try {
       session.proc?.terminal?.resize(msg.cols, msg.rows);
     } catch {}
-  } else if (msg.type === "close_session") {
-    const closing = sessions.get(msg.session);
-    if (closing) closing.clients.delete(ws);
-    closeSession(msg.session);
   }
 }
 
@@ -106,11 +105,9 @@ const server = Bun.serve<WsData>({
       return handleUpload(req);
     }
 
-    // Static assets — strip path traversal attempts
+    // Static assets — sanitized and 404 on miss
     if (pathname.startsWith("/assets/")) {
-      const asset = pathname.slice("/assets/".length).replace(/\.\./g, "");
-      const filePath = path.join(import.meta.dir, "assets", asset);
-      return new Response(Bun.file(filePath));
+      return serveAsset(pathname, path.join(import.meta.dir, "assets"));
     }
 
     // Serve index.html — inject ingress path, theme, font size per request

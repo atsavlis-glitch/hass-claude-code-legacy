@@ -28,7 +28,7 @@ RUN apk add --no-cache \
 # Works with zero config: it reads SUPERVISOR_TOKEN (granted by hassio_api: true)
 # and defaults to the `supervisor` endpoint.
 ARG BUILD_ARCH
-ARG HA_CLI_VERSION=5.2.0
+ARG HA_CLI_VERSION=5.3.0
 RUN curl -fsSL "https://github.com/home-assistant/cli/releases/download/${HA_CLI_VERSION}/ha_${BUILD_ARCH}" \
       -o /usr/bin/ha && chmod +x /usr/bin/ha
 
@@ -53,6 +53,7 @@ RUN bun install && \
     cp node_modules/@xterm/xterm/lib/xterm.js /app/assets/ && \
     cp node_modules/@xterm/xterm/css/xterm.css /app/assets/ && \
     cp node_modules/@xterm/addon-fit/lib/addon-fit.js /app/assets/ && \
+    cp node_modules/@xterm/addon-web-links/lib/addon-web-links.js /app/assets/ && \
     cd / && rm -rf /tmp/xterm-build
 
 # Copy all rootfs files (app source, s6 services, etc.)

@@ -24,7 +24,7 @@ describe("handleUpload", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json() as { path: string };
-    expect(body.path).toMatch(/^\/tmp\/test-claude-paste-\d+\/\d+-[a-f0-9]{8}\.png$/);
+    expect(body.path).toMatch(/^\/tmp\/test-claude-paste-\d+\/default\/image_\d+\.png$/);
     expect(existsSync(body.path)).toBe(true);
   });
 
