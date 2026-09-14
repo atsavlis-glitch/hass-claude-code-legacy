@@ -1,34 +1,42 @@
 name: Claude Code Legacy CPU
-version: "1.0.8"
-slug: hass-claude-code
-description: Claude Code AI assistant with Home Assistant integration
-url: https://github.com/pujux/hass-claude-code
+version: "1.0.9"
+slug: hass-claude-code-legacy
+description: Claude Code AI assistant for Home Assistant using Node/npm for legacy CPU compatibility
+url: https://github.com/atsavlis-glitch/hass-claude-code-legacy
+
 arch:
   - amd64
-  - aarch64
+
 startup: application
 boot: auto
 init: false
 apparmor: false
+
 ingress: true
 ingress_port: 7681
 ingress_stream: true
+
 watchdog: tcp://[HOST]:[PORT:7681]
+
 panel_icon: mdi:head-snowflake
+
 homeassistant_api: true
 auth_api: true
 hassio_api: true
 hassio_role: manager
+
 map:
   - homeassistant_config:rw
   - ssl:ro
   - share:rw
   - media:rw
   - addon_config:rw
+
 options:
   terminal_font_size: 14
   terminal_theme: dark
-  auto_update_claude: true
+  auto_update_claude: false
+
 schema:
   terminal_font_size: "int(10,24)"
   terminal_theme: "list(dark|light)"
