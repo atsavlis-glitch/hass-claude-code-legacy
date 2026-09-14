@@ -62,7 +62,7 @@ RUN uv tool install hass-mcp
 #
 # Install the npm/Node distribution instead.
 #
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@2.1.112
 
 # -------------------------------------------------------------------
 # Node/TypeScript terminal server
