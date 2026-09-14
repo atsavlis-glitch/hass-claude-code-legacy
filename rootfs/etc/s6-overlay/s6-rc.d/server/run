@@ -11,8 +11,13 @@ AWS_REGION_VALUE="$(jq -r '.aws_region // "us-east-1"' "${OPTIONS_FILE}")"
 AWS_BEDROCK_TOKEN_VALUE="$(jq -r '.aws_bedrock_token // ""' "${OPTIONS_FILE}")"
 BEDROCK_MODEL_VALUE="$(jq -r '.bedrock_model // ""' "${OPTIONS_FILE}")"
 
-# Prevent Claude Code from replacing our npm-installed version
+# Prevent Claude Code from replacing our legacy Node installation.
 export DISABLE_AUTOUPDATER=1
+
+# This Home Assistant add-on is itself our container/sandbox boundary.
+# Claude normally blocks --dangerously-skip-permissions when running as root.
+# IS_SANDBOX=1 tells Claude that root is running inside the intended sandbox.
+export IS_SANDBOX=1
 
 if [ "${USE_BEDROCK}" = "true" ]; then
     echo "[Claude Code Legacy] Amazon Bedrock mode enabled"
@@ -41,6 +46,7 @@ else
     unset ANTHROPIC_MODEL
 fi
 
+echo "[Claude Code Legacy] Sandbox mode enabled"
 echo "[Claude Code Legacy] Starting Node/tsx terminal server..."
 
 exec /usr/local/bin/tsx /app/server.ts
