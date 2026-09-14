@@ -1,23 +1,33 @@
 import { mkdirSync, readFileSync } from "fs";
 import path from "path";
+import http from "http";
+import { WebSocketServer, WebSocket } from "ws";
+
 import {
   sessions,
   createSession,
   closeSession,
   renameSession,
   restartSessionProc,
+  type Client,
 } from "./session.ts";
+
 import { handleUpload, DEFAULT_UPLOAD_BASE } from "./upload.ts";
 import { serveAsset } from "./assets.ts";
 
 // --- Startup ---
+
 mkdirSync(DEFAULT_UPLOAD_BASE, { recursive: true });
 
-const htmlTemplate = readFileSync(path.join(import.meta.dir, "index.html"), "utf8");
+const APP_DIR = path.dirname(new URL(import.meta.url).pathname);
+const htmlTemplate = readFileSync(path.join(APP_DIR, "index.html"), "utf8");
+
 const FONT_SIZE = process.env.TERMINAL_FONT_SIZE || "14";
 const THEME = process.env.TERMINAL_THEME || "dark";
+const PORT = 7681;
 
 // --- Types ---
+
 type ClientMessage =
   | { type: "join"; session: string }
   | { type: "input"; data: string }
@@ -26,11 +36,18 @@ type ClientMessage =
   | { type: "close_session"; session: string }
   | { type: "rename_session"; from: string; to: string };
 
-type WsData = { session: string | null };
+type NodeClient = WebSocket &
+  Client & {
+    data: {
+      session: string | null;
+    };
+  };
 
 // --- WebSocket message handler ---
-function handleMessage(ws: any, raw: string): void {
+
+function handleMessage(ws: NodeClient, raw: string): void {
   let msg: ClientMessage;
+
   try {
     msg = JSON.parse(raw);
   } catch {
@@ -38,112 +55,317 @@ function handleMessage(ws: any, raw: string): void {
   }
 
   if (msg.type === "join" || msg.type === "new_session") {
-    const prev = sessions.get(ws.data.session);
-    if (prev) prev.clients.delete(ws);
-    const session = sessions.get(msg.session) ?? createSession(msg.session);
+    const previousName = ws.data.session;
+
+    if (previousName) {
+      const previous = sessions.get(previousName);
+      if (previous) {
+        previous.clients.delete(ws);
+      }
+    }
+
+    const session =
+      sessions.get(msg.session) ?? createSession(msg.session);
+
     session.clients.add(ws);
     ws.data.session = msg.session;
+
     if (session.scrollback) {
-      ws.send(JSON.stringify({ type: "output", data: session.scrollback }));
+      ws.send(
+        JSON.stringify({
+          type: "output",
+          data: session.scrollback,
+        })
+      );
     }
-    ws.send(JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] }));
+
+    ws.send(
+      JSON.stringify({
+        type: "session_list",
+        sessions: [...sessions.keys()],
+      })
+    );
+
     return;
   }
 
   if (msg.type === "rename_session") {
     if (!renameSession(msg.from, msg.to)) {
-      // Rename refused (stale name, duplicate target) — resync the requester's tabs
-      ws.send(JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] }));
+      ws.send(
+        JSON.stringify({
+          type: "session_list",
+          sessions: [...sessions.keys()],
+        })
+      );
     }
+
     return;
   }
 
   if (msg.type === "close_session") {
     const closing = sessions.get(msg.session);
-    if (closing) closing.clients.delete(ws);
+
+    if (closing) {
+      closing.clients.delete(ws);
+    }
+
     closeSession(msg.session);
+
+    if (ws.data.session === msg.session) {
+      ws.data.session = null;
+    }
+
     return;
   }
 
-  const sessionName: string | null = ws.data.session;
-  if (!sessionName) return;
+  const sessionName = ws.data.session;
+
+  if (!sessionName) {
+    return;
+  }
+
   const session = sessions.get(sessionName);
-  if (!session) return;
+
+  if (!session) {
+    return;
+  }
 
   if (msg.type === "input") {
-    // If PTY process has exited, restart it on first input ("press Enter to restart" UX)
-    if (session.proc?.exitCode !== null && session.proc?.exitCode !== undefined) {
+    // node-pty uses a null proc in our session wrapper after the shell exits.
+    // Restart it on the first input, preserving the old "press Enter to restart" UX.
+    if (!session.proc) {
       restartSessionProc(session);
     }
+
     try {
-      session.proc?.terminal?.write(msg.data);
-    } catch {}
-  } else if (msg.type === "resize") {
+      session.proc?.write(msg.data);
+    } catch {
+      // Ignore writes to a process that exited between checks.
+    }
+
+    return;
+  }
+
+  if (msg.type === "resize") {
     try {
-      session.proc?.terminal?.resize(msg.cols, msg.rows);
-    } catch {}
+      session.proc?.resize(msg.cols, msg.rows);
+    } catch {
+      // Ignore resize failures during process shutdown/restart.
+    }
   }
 }
 
-// --- HTTP + WebSocket server ---
-const server = Bun.serve<WsData>({
-  port: 7681,
+// --- Helpers ---
 
-  fetch(req, server) {
-    const url = new URL(req.url);
-    const pathname = url.pathname;
+async function sendWebResponse(
+  response: Response,
+  res: http.ServerResponse
+): Promise<void> {
+  res.statusCode = response.status;
 
-    // WebSocket upgrade
-    if (pathname === "/ws") {
-      const ok = server.upgrade(req, { data: { session: null } });
-      if (ok) return undefined;
-      return new Response("WebSocket upgrade failed", { status: 426 });
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
+  });
+
+  const body = Buffer.from(await response.arrayBuffer());
+  res.end(body);
+}
+
+function buildWebRequest(
+  req: http.IncomingMessage,
+  body?: Buffer
+): Request {
+  const host = req.headers.host || `localhost:${PORT}`;
+  const url = `http://${host}${req.url || "/"}`;
+
+  const headers = new Headers();
+
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+    } else if (value !== undefined) {
+      headers.set(key, value);
     }
+  }
+
+  const method = req.method || "GET";
+
+  if (
+    body &&
+    body.length > 0 &&
+    method !== "GET" &&
+    method !== "HEAD"
+  ) {
+    return new Request(url, {
+      method,
+      headers,
+      body,
+    });
+  }
+
+  return new Request(url, {
+    method,
+    headers,
+  });
+}
+
+async function collectRequestBody(
+  req: http.IncomingMessage
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of req) {
+    if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk);
+    } else {
+      chunks.push(Buffer.from(chunk));
+    }
+  }
+
+  return Buffer.concat(chunks);
+}
+
+// --- HTTP server ---
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const host = req.headers.host || `localhost:${PORT}`;
+    const url = new URL(req.url || "/", `http://${host}`);
+    const pathname = url.pathname;
 
     // Image upload
     if (pathname === "/upload" && req.method === "POST") {
-      return handleUpload(req);
+      const body = await collectRequestBody(req);
+      const webRequest = buildWebRequest(req, body);
+      const response = await handleUpload(webRequest);
+
+      await sendWebResponse(response, res);
+      return;
     }
 
-    // Static assets — sanitized and 404 on miss
+    // Static assets
     if (pathname.startsWith("/assets/")) {
-      return serveAsset(pathname, path.join(import.meta.dir, "assets"));
+      const response = await serveAsset(
+        pathname,
+        path.join(APP_DIR, "assets")
+      );
+
+      await sendWebResponse(response, res);
+      return;
     }
 
-    // Serve index.html — inject ingress path, theme, font size per request
-    const ingressPath = req.headers.get("X-Ingress-Path") || "";
+    // Serve index.html
+    const ingressHeader = req.headers["x-ingress-path"];
+    const ingressPath = Array.isArray(ingressHeader)
+      ? ingressHeader[0] || ""
+      : ingressHeader || "";
+
     const html = htmlTemplate
       .replaceAll("{{INGRESS_PATH}}", ingressPath)
       .replaceAll("{{THEME}}", THEME)
       .replaceAll("{{FONT_SIZE}}", FONT_SIZE);
-    return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-  },
 
-  websocket: {
-    open(ws) {
-      ws.send(JSON.stringify({ type: "session_list", sessions: [...sessions.keys()] }));
-    },
-    message(ws, msg) {
-      handleMessage(ws, typeof msg === "string" ? msg : msg.toString());
-    },
-    close(ws) {
-      const name = ws.data?.session;
-      if (name) {
-        const session = sessions.get(name);
-        if (session) session.clients.delete(ws);
-      }
-    },
-  },
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.end(html);
+  } catch (error) {
+    console.error("HTTP request failed:", error);
+
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    }
+
+    res.end("Internal server error");
+  }
 });
 
-// WebSocket-level pings every 30s — keeps HA Ingress proxy from dropping idle connections.
-// Bun ServerWebSocket.ping() sends RFC 6455 §5.5.2 ping frames; frontend ignores them.
+// --- WebSocket server ---
+
+const wss = new WebSocketServer({
+  noServer: true,
+});
+
+server.on("upgrade", (req, socket, head) => {
+  const host = req.headers.host || `localhost:${PORT}`;
+  const url = new URL(req.url || "/", `http://${host}`);
+
+  if (url.pathname !== "/ws") {
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(req, socket, head, (socketConnection) => {
+    const ws = socketConnection as NodeClient;
+
+    ws.data = {
+      session: null,
+    };
+
+    wss.emit("connection", ws, req);
+  });
+});
+
+wss.on("connection", (socket) => {
+  const ws = socket as NodeClient;
+
+  ws.send(
+    JSON.stringify({
+      type: "session_list",
+      sessions: [...sessions.keys()],
+    })
+  );
+
+  ws.on("message", (message) => {
+    handleMessage(
+      ws,
+      typeof message === "string"
+        ? message
+        : message.toString()
+    );
+  });
+
+  ws.on("close", () => {
+    const name = ws.data?.session;
+
+    if (!name) {
+      return;
+    }
+
+    const session = sessions.get(name);
+
+    if (session) {
+      session.clients.delete(ws);
+    }
+  });
+
+  ws.on("error", (error) => {
+    console.error("WebSocket error:", error);
+  });
+});
+
+// WebSocket-level pings every 30 seconds.
+// This helps keep Home Assistant Ingress from dropping idle connections.
 setInterval(() => {
   for (const session of sessions.values()) {
-    for (const ws of session.clients) {
-      try { ws.ping(); } catch {}
+    for (const client of session.clients) {
+      const ws = client as NodeClient;
+
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        }
+      } catch {
+        // Ignore stale sockets.
+      }
     }
   }
 }, 30_000);
 
-console.log(`Claude Code terminal running on :${server.port}`);
+// --- Start server ---
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Claude Code terminal running on :${PORT}`);
+});
