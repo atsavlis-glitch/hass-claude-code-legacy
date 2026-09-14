@@ -1,4 +1,4 @@
-name: Claude Code
+name: Claude Code Legacy CPU
 version: "1.0.8"
 slug: hass-claude-code
 description: Claude Code AI assistant with Home Assistant integration
