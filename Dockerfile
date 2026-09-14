@@ -11,10 +11,7 @@ ENV \
 # -------------------------------------------------------------------
 # System and build dependencies
 # -------------------------------------------------------------------
-#
-# build-base is required because node-pty contains native code and may
-# need to compile against the CPU/runtime used by this Home Assistant host.
-#
+
 RUN apk add --no-cache \
     bash \
     curl \
@@ -44,46 +41,46 @@ RUN curl -fsSL \
 # -------------------------------------------------------------------
 # uv + Home Assistant MCP
 # -------------------------------------------------------------------
-#
-# hass-mcp requires a newer Python environment than some HA base images
-# provide. uv manages that environment automatically.
-#
+
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 RUN uv tool install hass-mcp
 
 # -------------------------------------------------------------------
-# Claude Code
+# Claude Code - legacy CPU Node.js installation
 # -------------------------------------------------------------------
 #
-# Do NOT use Anthropic's native installer here.
-# The native Claude binary produced "Illegal instruction" on the
-# AMD Phenom host.
+# IMPORTANT:
+# Do NOT use Anthropic's native installer.
+# Do NOT use npm install -g @anthropic-ai/claude-code.
 #
-# Install the npm/Node distribution instead.
+# The AMD Phenom CPU cannot run the newer native/Bun Claude launcher.
 #
-RUN npm install -g @anthropic-ai/claude-code@2.1.112
+# Instead we download the older Node-based Claude Code npm package,
+# extract it manually, and create our own launcher that directly runs
+# cli.js using Node.
+#
+
+RUN mkdir -p /opt/claude-node \
+    && cd /tmp \
+    && npm pack @anthropic-ai/claude-code@2.1.108 \
+    && tar -xzf anthropic-ai-claude-code-2.1.108.tgz \
+    && cp -r package/* /opt/claude-node/ \
+    && printf '#!/bin/sh\nexec node /opt/claude-node/cli.js "$@"\n' > /usr/local/bin/claude \
+    && chmod +x /usr/local/bin/claude \
+    && rm -rf /tmp/package \
+    && rm -f /tmp/anthropic-ai-claude-code-2.1.108.tgz
 
 # -------------------------------------------------------------------
-# Node/TypeScript terminal server
+# Node / TypeScript terminal server
 # -------------------------------------------------------------------
-#
-# The original add-on used Bun.
-# Our legacy-CPU fork runs the server using Node instead.
-#
-# Install tsx globally because the s6 startup script launches:
-#
-#   /usr/local/bin/tsx /app/server.ts
-#
+
 RUN npm install -g tsx
 
 # -------------------------------------------------------------------
 # Application dependencies
 # -------------------------------------------------------------------
-#
-# Install package.json directly into /app so runtime dependencies such as
-# ws and node-pty remain available when the add-on is running.
-#
+
 WORKDIR /app
 
 COPY rootfs/app/package.json /app/package.json
@@ -93,9 +90,7 @@ RUN npm install
 # -------------------------------------------------------------------
 # Browser-side xterm assets
 # -------------------------------------------------------------------
-#
-# These files are loaded by the browser UI.
-#
+
 RUN mkdir -p /app/assets \
     && cp node_modules/@xterm/xterm/lib/xterm.js /app/assets/ \
     && cp node_modules/@xterm/xterm/css/xterm.css /app/assets/ \
@@ -105,13 +100,10 @@ RUN mkdir -p /app/assets \
 # -------------------------------------------------------------------
 # Copy add-on files
 # -------------------------------------------------------------------
-#
-# This copies server.ts, session.ts, assets.ts, upload.ts, index.html,
-# the s6 service files, and the rest of the add-on root filesystem.
-#
+
 COPY rootfs/ /
 
-# Ensure the s6 server startup script is executable.
+# Ensure the s6 startup script is executable
 RUN chmod a+x /etc/s6-overlay/s6-rc.d/server/run
 
 WORKDIR /root
