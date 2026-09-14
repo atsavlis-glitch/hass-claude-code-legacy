@@ -1,16 +1,70 @@
 import path from "path";
+import { readFile } from "fs/promises";
 
-export async function serveAsset(pathname: string, assetsDir: string): Promise<Response> {
-  const resolved = path.resolve(assetsDir, pathname.slice("/assets/".length));
-  // resolve() follows absolute/dot segments wherever they lead — only serve inside assetsDir
-  if (!resolved.startsWith(assetsDir + path.sep)) {
-    return new Response("Not found", { status: 404 });
+function getContentType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+
+  switch (ext) {
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".ico":
+      return "image/x-icon";
+    default:
+      return "application/octet-stream";
   }
-  const file = Bun.file(resolved);
-  if (!(await file.exists())) {
-    return new Response("Not found", { status: 404 });
+}
+
+export async function serveAsset(
+  pathname: string,
+  assetsDir: string
+): Promise<Response> {
+  const resolved = path.resolve(
+    assetsDir,
+    pathname.slice("/assets/".length)
+  );
+
+  // Only allow files located inside the assets directory.
+  const relative = path.relative(assetsDir, resolved);
+
+  if (
+    relative.startsWith("..") ||
+    path.isAbsolute(relative)
+  ) {
+    return new Response("Not found", {
+      status: 404,
+    });
   }
-  // no-cache = revalidate every load; keeps browsers from serving a stale
-  // xterm.js against newer addons after an add-on upgrade
-  return new Response(file, { headers: { "Cache-Control": "no-cache" } });
+
+  try {
+    const file = await readFile(resolved);
+
+    return new Response(file, {
+      status: 200,
+      headers: {
+        "Content-Type": getContentType(resolved),
+        "Cache-Control": "no-cache",
+      },
+    });
+  } catch {
+    return new Response("Not found", {
+      status: 404,
+    });
+  }
 }
