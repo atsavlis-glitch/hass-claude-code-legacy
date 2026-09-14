@@ -2,6 +2,45 @@
 
 set -e
 
+OPTIONS_FILE="/data/options.json"
+
+echo "[Claude Code Legacy] Reading add-on configuration..."
+
+USE_BEDROCK="$(jq -r '.use_bedrock // false' "${OPTIONS_FILE}")"
+AWS_REGION_VALUE="$(jq -r '.aws_region // "us-east-1"' "${OPTIONS_FILE}")"
+AWS_BEDROCK_TOKEN_VALUE="$(jq -r '.aws_bedrock_token // ""' "${OPTIONS_FILE}")"
+BEDROCK_MODEL_VALUE="$(jq -r '.bedrock_model // ""' "${OPTIONS_FILE}")"
+
+# Prevent Claude Code from replacing our npm-installed version
+export DISABLE_AUTOUPDATER=1
+
+if [ "${USE_BEDROCK}" = "true" ]; then
+    echo "[Claude Code Legacy] Amazon Bedrock mode enabled"
+
+    export CLAUDE_CODE_USE_BEDROCK=1
+    export AWS_REGION="${AWS_REGION_VALUE}"
+    export AWS_DEFAULT_REGION="${AWS_REGION_VALUE}"
+
+    if [ -n "${AWS_BEDROCK_TOKEN_VALUE}" ]; then
+        export AWS_BEARER_TOKEN_BEDROCK="${AWS_BEDROCK_TOKEN_VALUE}"
+    else
+        echo "[Claude Code Legacy] WARNING: Bedrock is enabled but aws_bedrock_token is empty"
+    fi
+
+    if [ -n "${BEDROCK_MODEL_VALUE}" ]; then
+        export ANTHROPIC_MODEL="${BEDROCK_MODEL_VALUE}"
+    fi
+
+    echo "[Claude Code Legacy] AWS region: ${AWS_REGION_VALUE}"
+    echo "[Claude Code Legacy] Bedrock model: ${BEDROCK_MODEL_VALUE}"
+else
+    echo "[Claude Code Legacy] Bedrock mode disabled"
+
+    unset CLAUDE_CODE_USE_BEDROCK
+    unset AWS_BEARER_TOKEN_BEDROCK
+    unset ANTHROPIC_MODEL
+fi
+
 echo "[Claude Code Legacy] Starting Node/tsx terminal server..."
 
 exec /usr/local/bin/tsx /app/server.ts
