@@ -40,9 +40,11 @@ RUN curl -fsSL https://bun.sh/install | bash
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 RUN uv tool install hass-mcp
 
-# Install Claude Code via native installer
-# Binary is placed at /root/.local/bin/claude
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Install Node.js/npm for legacy CPU-compatible Claude Code install
+RUN apk add --no-cache nodejs npm
+
+# Install Claude Code via npm instead of native installer
+RUN npm install -g @anthropic-ai/claude-code
 
 # Extract xterm.js browser assets from npm packages
 # These run in the browser only — not imported by server.ts
