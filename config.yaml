@@ -1,5 +1,5 @@
 name: Claude Code Legacy CPU
-version: "1.0.13"
+version: "1.0.14"
 slug: hass-claude-code-legacy
 description: Claude Code AI assistant for Home Assistant using Node for legacy CPU compatibility
 url: https://github.com/atsavlis-glitch/hass-claude-code-legacy
@@ -48,4 +48,4 @@ schema:
   use_bedrock: bool
   aws_region: str
   aws_bedrock_token: password
-  bedrock_model: str
+  bedrock_model: "list(us.anthropic.claude-sonnet-4-6|us.anthropic.claude-opus-4-6)"
