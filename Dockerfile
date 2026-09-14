@@ -45,7 +45,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 RUN uv tool install hass-mcp
 
 # ------------------------------------------------------------
-# Remove ANY existing Claude global/native installation
+# Remove any existing Claude global/native installation
 # ------------------------------------------------------------
 
 RUN npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true \
@@ -56,12 +56,10 @@ RUN npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true \
 # Claude Code legacy Node-only installation
 # ------------------------------------------------------------
 #
-# We deliberately DO NOT use:
-#   curl https://claude.ai/install.sh
-#   npm install -g @anthropic-ai/claude-code
-#
-# The Phenom CPU cannot execute the newer native Claude/Bun binary.
-# We extract an older package and invoke cli.js directly with Node.
+# IMPORTANT:
+# The AMD Phenom CPU cannot run the newer native Claude/Bun binary.
+# We therefore extract Claude Code 2.1.108 and run cli.js directly
+# through Node.js.
 #
 
 RUN mkdir -p /opt/claude-node \
@@ -72,18 +70,31 @@ RUN mkdir -p /opt/claude-node \
     && rm -rf /tmp/package \
     && rm -f /tmp/anthropic-ai-claude-code-2.1.108.tgz
 
-# Create our own Claude launcher.
+# ------------------------------------------------------------
+# Claude launcher
+# ------------------------------------------------------------
+#
+# Start Claude Code with permission prompts bypassed.
+#
+# This means Claude can use its tools without stopping to ask
+# for confirmation on every operation.
+#
+# WARNING:
+# Claude has broad access to the Home Assistant configuration.
+#
+
 RUN printf '%s\n' \
     '#!/bin/sh' \
-    'exec node /opt/claude-node/cli.js "$@"' \
+    'exec node /opt/claude-node/cli.js --dangerously-skip-permissions "$@"' \
     > /usr/local/bin/claude \
     && chmod 755 /usr/local/bin/claude
 
-# Build marker so we can prove which image is running.
+# Build marker so we can verify which image is running.
 RUN printf '%s\n' \
     'SolarShade Claude Legacy CPU' \
     'Node cli.js wrapper build' \
     'Claude package: 2.1.108' \
+    'Permissions: bypass enabled' \
     > /LEGACY_CLAUDE_BUILD
 
 # ------------------------------------------------------------
@@ -93,7 +104,7 @@ RUN printf '%s\n' \
 RUN npm install -g tsx
 
 # ------------------------------------------------------------
-# App dependencies
+# Application dependencies
 # ------------------------------------------------------------
 
 WORKDIR /app
