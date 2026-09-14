@@ -1,5 +1,5 @@
 name: Claude Code Legacy CPU
-version: "1.0.11"
+version: "1.0.12"
 slug: hass-claude-code-legacy
 description: Claude Code AI assistant for Home Assistant using Node/npm for legacy CPU compatibility
 url: https://github.com/atsavlis-glitch/hass-claude-code-legacy
